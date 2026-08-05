@@ -1,0 +1,109 @@
+import express from "express";
+import cors from "cors";
+import cookieParser from "cookie-parser";
+import { config } from "./config";
+import { connectDB } from "./lib/db";
+
+// Routes imports
+import campaignsRouter from "./routes/campaigns";
+import templatesRouter from "./routes/templates";
+import subscribersRouter from "./routes/subscribers";
+import testSendRouter from "./routes/test-send";
+import trackingRouter from "./routes/tracking";
+import unsubscribeRouter from "./routes/unsubscribe";
+import jobsRouter from "./routes/jobs";
+import dashboardRouter from "./routes/dashboard";
+import webinarsRouter from "./routes/webinars";
+import segmentsRouter from "./routes/segments";
+import notificationsRouter from "./routes/notifications";
+import whatsappRouter from "./routes/whatsapp";
+import { queueAdminRouter, queueAdminBasePath } from "./routes/queue-admin";
+import { authMiddleware, requireRole } from "./middleware/auth";
+
+const app = express();
+
+// 1. Establish Database Connection
+connectDB().catch((err) => {
+  console.error("Critical database connection error on startup:", err);
+  process.exit(1);
+});
+
+// 2. Register Global Middlewares
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl, or server-to-server calls)
+      if (!origin) return callback(null, true);
+
+      // Allow localhost connections (port 3000, 3001, etc.)
+      if (origin.includes("localhost") || origin.includes("127.0.0.1")) {
+        return callback(null, true);
+      }
+
+      // Brand-configurable allowed origins (see config.branding.allowedOriginSuffixes)
+      const allowed = config.branding.allowedOriginSuffixes.some(
+        (suffix) => origin === suffix || origin.endsWith(suffix)
+      );
+      if (allowed) {
+        return callback(null, true);
+      }
+
+      if (process.env.NODE_ENV === "production") {
+        return callback(new Error(`Origin ${origin} is not allowed by CORS`));
+      }
+      return callback(null, true); // Allow all for high compatibility in development
+    },
+    credentials: true,
+  })
+);
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use(cookieParser());
+
+// Disable caching for all API routes to ensure real-time MongoDB data
+app.use((req, res, next) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  next();
+});
+
+// 3. Mount API Endpoints (matching Next.js patterns exactly)
+app.use("/api/track", trackingRouter); // mounts /open and /click -> /api/track/open & /api/track/click
+app.use("/api/unsubscribe", unsubscribeRouter);
+app.use("/api/campaigns", campaignsRouter);
+app.use("/api/templates", templatesRouter);
+app.use("/api/subscribers", subscribersRouter);
+app.use("/api/test-send", testSendRouter);
+app.use("/api/jobs", jobsRouter);
+app.use("/api/segments", segmentsRouter);
+app.use("/api/webinars", webinarsRouter);
+app.use("/api/notifications", notificationsRouter);
+app.use("/api/whatsapp", whatsappRouter);
+app.use(queueAdminBasePath, authMiddleware, requireRole("admin"), queueAdminRouter);
+app.use("/api", dashboardRouter);
+
+// Standard Health Check
+app.get("/health", (req, res) => {
+  res.json({
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    env: process.env.NODE_ENV || "development",
+  });
+});
+
+// 4. Register Express Error Handlers
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error("Express App Error:", err);
+  res.status(err.status || 500).json({
+    error: err.message || "An internal server error occurred",
+  });
+});
+
+// 5. Start Server Listening
+const PORT = config.port;
+app.listen(PORT, () => {
+  console.log(`=================================================`);
+  console.log(`📧 Standalone Mail Backend Listening on port ${PORT}`);
+  console.log(`=================================================`);
+});
