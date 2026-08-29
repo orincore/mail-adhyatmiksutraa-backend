@@ -7,6 +7,7 @@ import Webinar from "../../models/Webinar";
 import { getEmailProvider } from "../../providers/provider-factory";
 import { prepareEmailHtml, replaceMergeTags, buildListUnsubscribeHeaders, TrackingSource } from "../tracking-parser";
 import { isTransientSendError, getDailyQuotaRemaining } from "../send-throttle";
+import { formatDate } from "../whatsapp-templates";
 import { wrapTextTemplate } from "../queue-processor";
 import { config } from "../../config";
 import { redisConnection, queuePrefix } from "./connection";
@@ -60,11 +61,14 @@ async function processEmailSend(job: { data: EmailSendJobData }): Promise<void> 
 
   const trackingUrl = config.appUrl;
   const source: TrackingSource = { type: "reminder", id: reminder._id.toString() };
-  // The reminder's webinar is authoritative for {{join_link}}/{{webinar}} —
-  // subscriber metadata can lag behind a registrant sync.
+  // The reminder's webinar is authoritative for {{join_link}}/{{webinar}}/{{date}} —
+  // subscriber metadata can lag behind a registrant sync, and without this
+  // override {{date}} falls back to prepareEmailHtml's default of "today",
+  // not the webinar's actual starts_at.
   const tagOverrides: Record<string, string> = {
     "{{join_link}}": `${config.mainWebsite.url}/webinar/join/${webinar.source_window_id}`,
     "{{webinar}}": webinar.title,
+    "{{date}}": formatDate(webinar.starts_at, webinar.timezone),
   };
 
   try {
